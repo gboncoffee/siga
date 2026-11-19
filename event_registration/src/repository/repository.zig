@@ -12,6 +12,12 @@ pub const Event = struct {
     name: [name_size + 1:0]u8,
 };
 
+/// Event row with a heap-allocated name, used when listing.
+pub const EventEntry = struct {
+    id: i32,
+    name: []const u8,
+};
+
 db: sqlite.Db,
 
 pub fn init() !Repository {
@@ -73,4 +79,13 @@ pub fn findByName(r: *Repository, event_name: []const u8) !?Event {
     }
 
     return row;
+}
+
+/// Returns every event ordered by id. Memory is owned by `allocator`.
+pub fn findAll(r: *Repository, allocator: std.mem.Allocator) ![]EventEntry {
+    const query = "select id, name from events order by id";
+    var stmt = try r.db.prepare(query);
+    defer stmt.deinit();
+
+    return stmt.all(EventEntry, allocator, .{}, .{});
 }

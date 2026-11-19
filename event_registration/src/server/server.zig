@@ -4,7 +4,7 @@ const repository = @import("repository");
 
 pub const Server = @This();
 
-const PutRequest = struct {
+const PostRequest = struct {
     name: []const u8,
 };
 const Response = struct {
@@ -29,8 +29,9 @@ pub fn start(io: std.Io, allocator: std.mem.Allocator) !void {
         server.deinit();
     }
     var router = try server.router(.{});
+    router.get("/event", handleListEvents, .{});
     router.get("/event/:id", handleGetEvent, .{});
-    router.put("/event", handlePutEvent, .{});
+    router.post("/event", handlePostEvent, .{});
 
     try server.listen();
 }
@@ -38,6 +39,16 @@ pub fn start(io: std.Io, allocator: std.mem.Allocator) !void {
 fn sendError(res: *httpz.Response, status: u16, message: []const u8) !void {
     res.status = status;
     try res.json(.{ .@"error" = message }, .{});
+}
+
+fn handleListEvents(_: *httpz.Request, res: *httpz.Response) !void {
+    const events = db.findAll(res.arena) catch |err| {
+        std.log.err("findAll failed: {t}", .{err});
+        return sendError(res, 500, "internal error");
+    };
+
+    res.status = 200;
+    try res.json(events, .{});
 }
 
 fn handleGetEvent(req: *httpz.Request, res: *httpz.Response) !void {
@@ -59,8 +70,8 @@ fn handleGetEvent(req: *httpz.Request, res: *httpz.Response) !void {
     }, .{});
 }
 
-fn handlePutEvent(req: *httpz.Request, res: *httpz.Response) !void {
-    const maybe_request = req.json(PutRequest) catch {
+fn handlePostEvent(req: *httpz.Request, res: *httpz.Response) !void {
+    const maybe_request = req.json(PostRequest) catch {
         return sendError(res, 400, "invalid body");
     };
     const request = maybe_request orelse return sendError(res, 400, "missing body");
@@ -77,7 +88,8 @@ fn handlePutEvent(req: *httpz.Request, res: *httpz.Response) !void {
         return sendError(res, 500, "internal error");
     };
 
-    res.status = 200;
+    res.status = 201;
+    res.header("Location", try std.fmt.allocPrint(res.arena, "/event/{d}", .{id}));
     try res.json(Response{
         .id = id,
         .name = request.name,
