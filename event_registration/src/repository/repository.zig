@@ -3,10 +3,13 @@ const sqlite = @import("sqlite");
 
 pub const Repository = @This();
 
+/// Maximum event name length, in bytes.
 pub const name_size: usize = 128;
 pub const Event = struct {
     id: i32,
-    name: [name_size:0]u8,
+    // zig-sqlite requires a sentinel-terminated array to be strictly larger
+    // than the stored text, so reserve one extra byte to fit `name_size`.
+    name: [name_size + 1:0]u8,
 };
 
 db: sqlite.Db,
@@ -16,7 +19,9 @@ pub fn init() !Repository {
     var db = try sqlite.Db.init(.{
         .mode = sqlite.Db.Mode{ .File = "events.db" },
         .open_flags = .{ .create = true, .write = true },
-        .threading_mode = .MultiThread,
+        // The connection is shared by every httpz worker thread, so SQLite
+        // must serialize access to it.
+        .threading_mode = .Serialized,
     });
 
     try db.exec(
@@ -41,15 +46,11 @@ pub fn deinit(r: *Repository) void {
     r.db.deinit();
 }
 
-pub fn insertByName(r: *Repository, name: []const u8) !void {
-    const query = "insert into events(name) values(?)";
-    var stmt = try r.db.prepare(query);
-    defer stmt.deinit();
-
-    try stmt.exec(.{}, .{
-        .name = name,
-        // .name = std.mem.sliceTo(&event.name, 0),
-    });
+/// Inserts a new event and returns its id.
+pub fn insertByName(r: *Repository, name: []const u8) !i32 {
+    const query = "insert into events(name) values(?) returning id";
+    const id = try r.db.one(i32, query, .{}, .{ .name = name });
+    return id orelse error.InsertFailed;
 }
 
 pub fn findById(r: *Repository, event_id: i32) !?Event {
