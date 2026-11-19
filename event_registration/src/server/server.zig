@@ -1,6 +1,7 @@
 const std = @import("std");
 const httpz = @import("httpz");
 const repository = @import("repository");
+const auth = @import("auth");
 
 pub const Server = @This();
 
@@ -13,10 +14,15 @@ const Response = struct {
 };
 
 var db: repository.Repository = undefined;
+var authenticator: auth.Auth = undefined;
 
-pub fn start(io: std.Io, allocator: std.mem.Allocator) !void {
+pub fn start(io: std.Io, allocator: std.mem.Allocator, auth_url: []const u8) !void {
     db = try repository.init();
     defer db.deinit();
+
+    authenticator = auth.init(io, allocator, auth_url);
+    defer authenticator.deinit();
+    std.log.info("using auth service at {s}", .{authenticator.base_url});
 
     var server = try httpz.Server(void).init(
         io,
@@ -41,7 +47,27 @@ fn sendError(res: *httpz.Response, status: u16, message: []const u8) !void {
     try res.json(.{ .@"error" = message }, .{});
 }
 
-fn handleListEvents(_: *httpz.Request, res: *httpz.Response) !void {
+/// Answers the request with an error and returns false unless it carries a
+/// valid session token.
+fn requireAuth(req: *httpz.Request, res: *httpz.Response) !bool {
+    switch (authenticator.authenticate(req.header("authorization"))) {
+        .authenticated => return true,
+        .missing_token => {
+            res.header("WWW-Authenticate", "Bearer");
+            try sendError(res, 401, "missing or malformed token");
+        },
+        .invalid_token => {
+            res.header("WWW-Authenticate", "Bearer");
+            try sendError(res, 401, "invalid token");
+        },
+        .unavailable => try sendError(res, 503, "auth service unavailable"),
+    }
+    return false;
+}
+
+fn handleListEvents(req: *httpz.Request, res: *httpz.Response) !void {
+    if (!try requireAuth(req, res)) return;
+
     const events = db.findAll(res.arena) catch |err| {
         std.log.err("findAll failed: {t}", .{err});
         return sendError(res, 500, "internal error");
@@ -52,6 +78,8 @@ fn handleListEvents(_: *httpz.Request, res: *httpz.Response) !void {
 }
 
 fn handleGetEvent(req: *httpz.Request, res: *httpz.Response) !void {
+    if (!try requireAuth(req, res)) return;
+
     const raw_id = req.param("id") orelse return sendError(res, 400, "missing id");
     const id = std.fmt.parseInt(i32, raw_id, 10) catch {
         return sendError(res, 400, "invalid id");
@@ -71,6 +99,8 @@ fn handleGetEvent(req: *httpz.Request, res: *httpz.Response) !void {
 }
 
 fn handlePostEvent(req: *httpz.Request, res: *httpz.Response) !void {
+    if (!try requireAuth(req, res)) return;
+
     const maybe_request = req.json(PostRequest) catch {
         return sendError(res, 400, "invalid body");
     };

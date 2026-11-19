@@ -2,6 +2,7 @@ const std = @import("std");
 const Io = std.Io;
 const repository = @import("repository");
 const server = @import("server");
+const auth = @import("auth");
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
@@ -11,7 +12,10 @@ pub fn main(init: std.process.Init) !void {
     // std.debug.print("db: {any}\n", .{db});
     // defer db.deinit();
 
-    var server_future = Io.async(io, server.start, .{ io, allocator });
+    // Base URL of the Go auth service.
+    const auth_url = init.environ_map.get("SIGA_AUTH_URL") orelse auth.default_url;
+
+    var server_future = Io.async(io, server.start, .{ io, allocator, auth_url });
 
     // const event = try db.find(57);
     // std.debug.print("found event => id: '{}', name: '{s}'\n", .{event.id, event.name});

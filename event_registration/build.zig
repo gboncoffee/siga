@@ -41,15 +41,30 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    const auth = b.addLibrary(.{
+        .name = "auth",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/auth/auth.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
     exe.root_module.addImport("repository", repo.root_module);
     exe.root_module.addImport("server", server.root_module);
+    exe.root_module.addImport("auth", auth.root_module);
     repo.root_module.addImport("sqlite", sqlite.module("sqlite"));
     server.root_module.addImport("httpz", httpz.module("httpz"));
     server.root_module.addImport("repository", repo.root_module);
+    server.root_module.addImport("auth", auth.root_module);
 
     b.installArtifact(exe);
 
     const run_exe = b.addRunArtifact(exe);
     const run_step = b.step("run", "Run the program");
     run_step.dependOn(&run_exe.step);
+
+    const auth_tests = b.addTest(.{ .root_module = auth.root_module });
+    const test_step = b.step("test", "Run unit tests");
+    test_step.dependOn(&b.addRunArtifact(auth_tests).step);
 }
