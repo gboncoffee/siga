@@ -16,7 +16,12 @@ const Response = struct {
 var db: repository.Repository = undefined;
 var authenticator: auth.Auth = undefined;
 
-pub fn start(io: std.Io, allocator: std.mem.Allocator, auth_url: []const u8) !void {
+pub fn start(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    address: std.Io.net.IpAddress,
+    auth_url: []const u8,
+) !void {
     db = try repository.init();
     defer db.deinit();
 
@@ -27,7 +32,7 @@ pub fn start(io: std.Io, allocator: std.mem.Allocator, auth_url: []const u8) !vo
     var server = try httpz.Server(void).init(
         io,
         allocator,
-        .{ .address = .localhost(16000) },
+        .{ .address = .{ .ip = address } },
         {},
     );
     defer {
@@ -39,6 +44,7 @@ pub fn start(io: std.Io, allocator: std.mem.Allocator, auth_url: []const u8) !vo
     router.get("/event/:id", handleGetEvent, .{});
     router.post("/event", handlePostEvent, .{});
 
+    std.log.info("listening on {f}", .{address});
     try server.listen();
 }
 

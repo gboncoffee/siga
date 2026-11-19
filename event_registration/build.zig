@@ -50,6 +50,16 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    const options = b.addLibrary(.{
+        .name = "options",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/options/options.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
+    exe.root_module.addImport("options", options.root_module);
     exe.root_module.addImport("repository", repo.root_module);
     exe.root_module.addImport("server", server.root_module);
     exe.root_module.addImport("auth", auth.root_module);
@@ -67,4 +77,6 @@ pub fn build(b: *std.Build) void {
     const auth_tests = b.addTest(.{ .root_module = auth.root_module });
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&b.addRunArtifact(auth_tests).step);
+    const options_tests = b.addTest(.{ .root_module = options.root_module });
+    test_step.dependOn(&b.addRunArtifact(options_tests).step);
 }
