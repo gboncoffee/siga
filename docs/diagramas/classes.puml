@@ -1,0 +1,137 @@
+@startuml classes
+title SIGA - Diagrama de Classes
+
+skinparam packageStyle rectangle
+skinparam classAttributeIconSize 0
+hide empty members
+
+package "auth (Go)" as AuthSvc {
+  class router <<rotas>> {
+    + router()
+  }
+  class AuthHandlers <<handlers>> {
+    + login(w, r)
+    + logout(w, r)
+    + credentials(w, r)
+    + authenticated(w, r)
+  }
+  class "repository" as AuthRepo <<repositório>> {
+    + NewCredential(c: Credential): error
+    + GetByUsername(username: string): (Credential, error)
+    + NewSession(token: UUID): error
+    + SessionExists(token: UUID): error
+    + DeleteSession(token: UUID): error
+  }
+  class Credential <<entidade>> {
+    + Username: string
+    + Password: [64]byte
+  }
+  class Session <<tabela>> {
+    + token: UUID
+  }
+  router --> AuthHandlers
+  AuthHandlers --> AuthRepo
+  AuthRepo ..> Credential
+  AuthRepo ..> Session
+}
+
+package "users (Elixir/Phoenix)" as UsersSvc {
+  class UserController <<controller>> {
+    + create(conn, params)
+  }
+  class SessionController <<controller>> {
+    + create(conn, params)
+  }
+  class FallbackController <<controller>> {
+    + call(conn, error)
+  }
+  class Accounts <<contexto>> {
+    + create_user(attrs): {:ok, User} | {:error, motivo}
+    + login(name, password): {:ok, Response} | {:error, :auth_unavailable}
+  }
+  class User <<entidade>> {
+    + name: string {chave}
+    + password: string {virtual}
+    + registration_changeset(user, attrs)
+  }
+  class "Auth" as UsersAuth <<gateway>> {
+    + create_credentials(name, password): :ok | {:error, motivo}
+    + login(name, password): {:ok, Response} | {:error, :auth_unavailable}
+  }
+  class Repo <<repositório>> {
+    + insert(changeset)
+    + transact(fun)
+  }
+  UserController --> Accounts
+  SessionController --> Accounts
+  UserController ..> FallbackController : erros
+  SessionController ..> FallbackController : erros
+  Accounts --> User
+  Accounts --> Repo
+  Accounts --> UsersAuth
+}
+
+package "event_registration (Zig)" as EventSvc {
+  class Server <<handlers>> {
+    + start(io, allocator, address, auth_url)
+    - requireAuth(req, res): bool
+    - handleListEvents(req, res)
+    - handleGetEvent(req, res)
+    - handlePostEvent(req, res)
+  }
+  class "Auth" as EventAuth <<gateway>> {
+    + base_url: string
+    + authenticate(authorization: ?string): Result
+    + validate(token: string): Result
+    + tokenFromHeader(authorization): ?string
+    + isUuid(s: string): bool
+  }
+  enum Result {
+    authenticated
+    missing_token
+    invalid_token
+    unavailable
+  }
+  class "Repository" as EventRepo <<repositório>> {
+    + insertByName(name): i32
+    + findById(id: i32): ?Event
+    + findByName(name): ?Event
+    + findAll(allocator): []EventEntry
+  }
+  class Event <<entidade>> {
+    + id: i32
+    + name: [128]u8
+  }
+  class Options {
+    + address: string
+    + port: u16
+    + parse(args, diag): Options
+  }
+  Server --> EventAuth
+  Server --> EventRepo
+  EventAuth ..> Result
+  EventRepo ..> Event
+}
+
+package "inscrições (pendente)" as RegSvc #EEEEEE {
+  class Inscricao <<entidade>> {
+    + id
+    + evento_id
+    + usuario
+    + situacao: confirmada | espera | cancelada
+    + criada_em
+  }
+  class Presenca <<entidade>> {
+    + inscricao_id
+    + registrada_em
+  }
+  Inscricao "1" -- "0..1" Presenca
+}
+
+' Dependências entre serviços: só por HTTP, via gateways.
+UsersAuth ..> AuthHandlers : HTTP\nPOST /credentials\nPOST /login
+EventAuth ..> AuthHandlers : HTTP\nGET /{uuid}
+Inscricao ..> Event : evento_id\n(sem FK)
+Inscricao ..> User : usuario\n(sem FK)
+
+@enduml

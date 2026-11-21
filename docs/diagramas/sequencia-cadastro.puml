@@ -1,0 +1,62 @@
+@startuml sequencia-cadastro
+title SIGA - Sequência: criar conta (POST /users)
+
+autonumber
+actor Participante as P
+participant "UserController" as Ctrl
+participant "Accounts" as Acc
+participant "User" as U
+participant "Repo" as Repo
+database "users (SQLite)" as UDb
+participant "Auth\n(gateway)" as Gw
+participant "auth\n(Go)" as AuthSvc
+participant "FallbackController" as Fb
+
+P -> Ctrl : POST /users {"name", "password"}
+activate Ctrl
+Ctrl -> Acc : create_user(attrs)
+activate Acc
+Acc -> U : registration_changeset(%User{}, attrs)
+U --> Acc : changeset
+Acc -> Repo : transact(fn)
+activate Repo
+Repo -> UDb : BEGIN
+Acc -> Repo : insert(changeset)
+Repo -> UDb : INSERT INTO users(name)
+
+alt changeset inválido ou nome em uso
+  Repo --> Acc : {:error, changeset}
+  Repo -> UDb : ROLLBACK
+  Acc --> Ctrl : {:error, changeset}
+  Ctrl -> Fb : call(conn, erro)
+  Fb --> P : 409 nome em uso / 422 campos inválidos
+else nome gravado
+  Repo --> Acc : {:ok, user}
+  Acc -> Gw : create_credentials(name, password)
+  Gw -> AuthSvc : POST /credentials {"Username", "Password"}
+  alt 200
+    AuthSvc --> Gw : 200
+    Gw --> Acc : :ok
+    Repo -> UDb : COMMIT
+    Acc --> Ctrl : {:ok, user}
+    Ctrl --> P : 201 {"name": ...}
+  else outro status
+    AuthSvc --> Gw : 500
+    Gw --> Acc : {:error, :auth_rejected}
+    Repo -> UDb : ROLLBACK
+    Acc --> Ctrl : {:error, :auth_rejected}
+    Ctrl -> Fb : call(conn, erro)
+    Fb --> P : 502 "auth service rejected the credentials"
+  else auth inacessível (timeout 5 s)
+    Gw --> Acc : {:error, :auth_unavailable}
+    Repo -> UDb : ROLLBACK
+    Acc --> Ctrl : {:error, :auth_unavailable}
+    Ctrl -> Fb : call(conn, erro)
+    Fb --> P : 503 "auth service unavailable"
+  end
+end
+deactivate Repo
+deactivate Acc
+deactivate Ctrl
+
+@enduml

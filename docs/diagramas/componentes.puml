@@ -1,0 +1,67 @@
+@startuml componentes
+title SIGA - Diagrama de Componentes
+
+skinparam componentStyle uml2
+
+actor "Cliente HTTP\n(curl, testes, futura UI)" as Cliente
+
+node "Máquina única" {
+
+  component "users\n(Elixir/Phoenix, :4000)" as Users {
+    portin "POST /users\nPOST /login" as UsersApi
+    [UserController\nSessionController] as UCtrl
+    [Accounts] as UAcc
+    [Users.Auth\n(gateway)] as UGw
+    [Repo (Ecto)] as URepo
+    UsersApi --> UCtrl
+    UCtrl --> UAcc
+    UAcc --> URepo
+    UAcc --> UGw
+  }
+
+  component "event_registration\n(Zig, :16000)" as Events {
+    portin "GET /event\nGET /event/{id}\nPOST /event" as EventsApi
+    [server] as EServer
+    [auth.zig\n(gateway)] as EGw
+    [repository] as ERepo
+    EventsApi --> EServer
+    EServer --> EGw
+    EServer --> ERepo
+  }
+
+  component "auth\n(Go, localhost:8080)" as Auth {
+    portin "POST /credentials\nPOST /login\nPOST /logout/{uuid}\nGET /{uuid}" as AuthApi
+    [handlers] as AHandlers
+    [repository] as ARepo
+    AuthApi --> AHandlers
+    AHandlers --> ARepo
+  }
+
+  component "inscrições\n(pendente)" as Reg #EEEEEE
+
+  database "users_dev.db\n(DATABASE_PATH em prod)" as UDb
+  database "events.db" as EDb
+  database "db.db\n(credentials, sessions)" as ADb
+  database "inscrições.db" as RDb #EEEEEE
+
+  URepo --> UDb
+  ERepo --> EDb
+  ARepo --> ADb
+  Reg ..> RDb
+}
+
+Cliente --> UsersApi : HTTP/JSON
+Cliente --> EventsApi : HTTP/JSON\nBearer token
+Cliente ..> Reg : HTTP/JSON\nBearer token
+
+UGw --> AuthApi : HTTP/JSON\n(criar credencial, login)
+EGw --> AuthApi : HTTP\n(validar token)
+Reg ..> AuthApi : validar token
+Reg ..> EventsApi : consultar evento
+
+note right of Auth
+  Escuta só em localhost (ADR-005).
+  Clientes nunca acessam diretamente.
+end note
+
+@enduml

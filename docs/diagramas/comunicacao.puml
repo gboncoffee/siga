@@ -1,0 +1,29 @@
+@startuml comunicacao
+' PlantUML não tem diagrama de comunicação nativo. Ele é representado com
+' objetos ligados por vínculos, e as mensagens numeradas ficam nos vínculos.
+title SIGA - Comunicação: login (POST /login em users)
+
+allowmixing
+left to right direction
+
+actor ":Participante" as P
+object ":SessionController" as Ctrl
+object ":Accounts" as Acc
+object ":Users.Auth" as Gw
+object ":login (handler Go)" as Login
+object ":repository (Go)" as Repo
+object ":FallbackController" as Fb
+
+P -- Ctrl : 1: POST /login {name, password} →\n← 1.2: resposta do auth (200 {"Token"} ou 401)
+Ctrl -- Acc : 1.1: login(name, password) →
+Acc -- Gw : 1.1.1: login(name, password) →
+Gw -- Login : 1.1.1.1: POST /login {Username, Password} →
+Login -- Repo : 1.1.1.1.1: GetByUsername(username) →\n1.1.1.1.2: [senha confere] NewSession(token) →
+Ctrl -- Fb : 1.3: [auth inacessível] call(conn, {:error, :auth_unavailable}) →\n[sem nome ou senha] call(conn, {:error, :bad_request}) →
+
+note bottom of Fb
+  503 auth service unavailable
+  400 name and password are required
+end note
+
+@enduml

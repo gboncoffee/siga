@@ -1,0 +1,56 @@
+@startuml sequencia
+title SIGA - Sequência: cadastrar evento (POST /event)
+
+autonumber
+actor Organizador as Org
+participant "Server\n(event_registration)" as Server
+participant "Auth\n(auth.zig)" as Gw
+participant "auth\n(Go)" as AuthSvc
+database "sessions\n(db.db)" as SessDb
+participant "Repository\n(event_registration)" as Repo
+database "events.db" as EvDb
+
+Org -> Server : POST /event\nAuthorization: Bearer <uuid>\n{"name": "Semana Acadêmica"}
+activate Server
+Server -> Server : requireAuth(req, res)
+Server -> Gw : authenticate(header)
+Gw -> Gw : tokenFromHeader(header)\nisUuid(token)
+
+alt token ausente ou malformado
+  Gw --> Server : missing_token
+  Server --> Org : 401 {"error": "missing or malformed token"}
+else token bem formado
+  Gw -> AuthSvc : GET /{uuid}
+  alt auth acessível
+    AuthSvc -> SessDb : SessionExists(token)
+    SessDb --> AuthSvc : linha / sem linha
+    AuthSvc --> Gw : 200 ou 401
+  else auth fora do ar
+    Gw -> Gw : falha de conexão
+  end
+
+  alt 401: sessão não existe
+    Gw --> Server : invalid_token
+    Server --> Org : 401 {"error": "invalid token"}
+  else falha de conexão ou status inesperado
+    Gw --> Server : unavailable
+    Server --> Org : 503 {"error": "auth service unavailable"}
+  else 200
+    Gw --> Server : authenticated
+    Server -> Server : req.json(PostRequest)
+    alt nome vazio ou > 128 bytes
+      Server --> Org : 400 {"error": "name is empty" | "name too big"}
+    else nome válido
+      Server -> Repo : insertByName(name)
+      activate Repo
+      Repo -> EvDb : insert into events(name) returning id
+      EvDb --> Repo : id
+      Repo --> Server : id
+      deactivate Repo
+      Server --> Org : 201 Location: /event/{id}\n{"id": id, "name": name}
+    end
+  end
+end
+deactivate Server
+
+@enduml
