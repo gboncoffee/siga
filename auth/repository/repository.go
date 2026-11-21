@@ -3,7 +3,6 @@ package repository
 import (
 	"crypto/sha512"
 	"database/sql"
-	"log"
 	"uuid"
 
 	_ "modernc.org/sqlite"
@@ -16,27 +15,37 @@ type Credential struct {
 
 var db *sql.DB
 
-func init() {
-	var err error
-	db, err = sql.Open("sqlite", "db.db")
+// Open opens (creating if needed) the SQLite database at path. It must be
+// called before any other function of this package.
+func Open(path string) error {
+	conn, err := sql.Open("sqlite", path)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
-	_, err = db.Exec(`
+	_, err = conn.Exec(`
 		CREATE TABLE IF NOT EXISTS credentials (
 			username TEXT NOT NULL UNIQUE,
 			password BLOB NOT NULL CHECK (LENGTH(password) == 64)
 		)`)
 	if err != nil {
-		log.Fatal(err)
+		conn.Close()
+		return err
 	}
-	_, err = db.Exec(`
+	_, err = conn.Exec(`
 		CREATE TABLE IF NOT EXISTS sessions (
             token BLOB CHECK (LENGTH(token) == 16)
 		)`)
 	if err != nil {
-		log.Fatal(err)
+		conn.Close()
+		return err
 	}
+	db = conn
+	return nil
+}
+
+// Close closes the database opened by Open.
+func Close() error {
+	return db.Close()
 }
 
 func NewCredential(c Credential) error {
