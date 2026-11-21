@@ -25,6 +25,17 @@ acadêmicos e inscrições.
 
   Para gerar as imagens de novo: `cd docs/diagramas && plantuml -tpng *.puml`.
 
+### Site da documentação
+
+`docs/site/build.sh` converte os `.md` de `docs/` em um site estático (HTML,
+CSS e diagramas em SVG) no diretório `site/`. Precisa de `pandoc` e
+`plantuml`. O diretório gerado pode ser copiado para qualquer servidor web.
+
+```sh
+docs/site/build.sh              # gera em site/
+docs/site/build.sh /outro/dir   # gera em outro diretório
+```
+
 ## Serviços
 
 | Diretório | Linguagem | Porta padrão | Função |
