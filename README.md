@@ -15,9 +15,15 @@ acadêmicos e inscrições.
   - [ADR-003: Token opaco validado a cada requisição](docs/adr/ADR-003.md)
   - [ADR-004: Comunicação síncrona HTTP/JSON](docs/adr/ADR-004.md)
   - [ADR-005: `auth` acessível só pela máquina local](docs/adr/ADR-005.md)
-- Diagramas (PlantUML) em [docs/diagramas](docs/diagramas): classes,
-  sequência (cadastro de evento e criação de conta), comunicação (login) e
-  componentes.
+- Diagramas (fonte PlantUML `.puml` e imagem `.png` em
+  [docs/diagramas](docs/diagramas)):
+  - [Classes](docs/diagramas/classes.png)
+  - [Sequência: cadastrar evento](docs/diagramas/sequencia.png)
+  - [Sequência: criar conta](docs/diagramas/sequencia-cadastro.png)
+  - [Comunicação: login](docs/diagramas/comunicacao.png)
+  - [Componentes](docs/diagramas/componentes.png)
+
+  Para gerar as imagens de novo: `cd docs/diagramas && plantuml -tpng *.puml`.
 
 ## Serviços
 

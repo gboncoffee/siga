@@ -30,7 +30,7 @@ node "Máquina única" {
   }
 
   component "auth\n(Go, localhost:8080)" as Auth {
-    portin "POST /credentials\nPOST /login\nPOST /logout/{uuid}\nGET /{uuid}" as AuthApi
+    portin "API interna" as AuthApi
     [handlers] as AHandlers
     [repository] as ARepo
     AuthApi --> AHandlers
@@ -60,6 +60,9 @@ Reg ..> AuthApi : validar token
 Reg ..> EventsApi : consultar evento
 
 note right of Auth
+  Rotas: POST /credentials, POST /login,
+  POST /logout/{uuid}, GET /{uuid}
+
   Escuta só em localhost (ADR-005).
   Clientes nunca acessam diretamente.
 end note
