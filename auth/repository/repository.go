@@ -31,9 +31,24 @@ func Open(path string) error {
 		conn.Close()
 		return err
 	}
+	// Older databases have a sessions table without the owner of the
+	// session. Sessions are disposable, so the table is just recreated: the
+	// users have to log in again.
+	var hasUsername bool
+	err = conn.QueryRow(
+		`SELECT COUNT(*) > 0 FROM pragma_table_info('sessions') WHERE name = 'username'`,
+	).Scan(&hasUsername)
+	if err == nil && !hasUsername {
+		_, err = conn.Exec(`DROP TABLE IF EXISTS sessions`)
+	}
+	if err != nil {
+		conn.Close()
+		return err
+	}
 	_, err = conn.Exec(`
 		CREATE TABLE IF NOT EXISTS sessions (
-            token BLOB CHECK (LENGTH(token) == 16)
+			token BLOB CHECK (LENGTH(token) == 16),
+			username TEXT NOT NULL
 		)`)
 	if err != nil {
 		conn.Close()
@@ -67,20 +82,24 @@ func GetByUsername(username string) (Credential, error) {
 	return c, err
 }
 
-func NewSession(token uuid.UUID) error {
+// NewSession records token as a session of username.
+func NewSession(token uuid.UUID, username string) error {
 	_, err := db.Exec(
-		`INSERT INTO sessions (token) VALUES (?)`, token[:],
+		`INSERT INTO sessions (token, username) VALUES (?, ?)`,
+		token[:], username,
 	)
 	return err
 }
 
-func SessionExists(token uuid.UUID) error {
-	var t uuid.UUID
+// SessionUsername returns the user that owns the session, or sql.ErrNoRows if
+// there is no such session.
+func SessionUsername(token uuid.UUID) (string, error) {
+	var username string
 	err := db.QueryRow(
-		`SELECT token FROM sessions WHERE token = ?`,
+		`SELECT username FROM sessions WHERE token = ?`,
 		token[:],
-	).Scan(&t)
-	return err
+	).Scan(&username)
+	return username, err
 }
 
 func DeleteSession(token uuid.UUID) error {

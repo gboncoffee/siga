@@ -8,7 +8,7 @@ Diagrama correspondente: [diagramas/classes.puml](diagramas/classes.puml).
 |---|---|---|
 | Usuário | `users` | Pessoa com conta no SIGA, identificada pelo nome (chave primária). Não guarda senha. |
 | Credencial | `auth` | Par nome de usuário e hash SHA-512 da senha. |
-| Sessão | `auth` | Token UUID gerado no login e apagado no logout. |
+| Sessão | `auth` | Token UUID gerado no login e apagado no logout, ligado ao nome do usuário que entrou. |
 | Evento | `event_registration` | Atividade acadêmica com identificador e nome. |
 | Inscrição | `signups` | Vínculo entre um nome de usuário e um id de evento. Única por par (usuário, evento). Situações de espera e cancelamento ainda não existem. |
 | Presença | `signups` | Campo `presence_confirmed` (0 ou 1) da inscrição: se o inscrito compareceu. |
@@ -16,7 +16,7 @@ Diagrama correspondente: [diagramas/classes.puml](diagramas/classes.puml).
 Os serviços não compartilham objetos. Os dados que cruzam fronteiras são o
 **nome do usuário** (entre `users` e `auth`, e no corpo das requisições ao
 `signups`), o **token** (do cliente para `event_registration` e `signups`, e
-deles para o `auth`) e o **id do evento** (entre `signups` e
+deles para o `auth`, que responde de quem é a sessão) e o **id do evento** (entre `signups` e
 `event_registration`). A inscrição se refere a usuário e evento apenas por
 nome e id, sem chave estrangeira.
 
@@ -58,9 +58,10 @@ nome e id, sem chave estrangeira.
 
 | Elemento | Responsabilidade |
 |---|---|
-| `main`, `router` | Lê as opções (`-address`, `-port`, `-auth-url`, `-event-url`) e liga cada rota ao seu *handler*. |
+| `main`, `router` | Lê as opções (`-address`, `-port`, `-auth-url`, `-event-url`, `-db`), abre o banco e liga cada rota ao seu *handler*. |
 | `signup`, `presence`, `check_signup` | *Handlers*: autenticam, validam o corpo, chamam o repositório e escolhem o status HTTP. |
-| `authenticate` | Cliente do `auth`: extrai o token do cabeçalho `Authorization: Bearer` e pergunta ao `auth` se a sessão existe. |
+| `authenticate` | Cliente do `auth`: extrai o token do cabeçalho `Authorization: Bearer` e pergunta ao `auth` de quem é a sessão. Devolve token e nome do usuário. |
+| `ownUsername` | Garante que o usuário só age sobre as próprias inscrições: o nome vem do token, e um nome diferente no corpo é recusado (403). |
 | `eventExists` | Cliente do `event_registration`: confere se o evento existe, repassando o token do cliente. |
 | `repository` (`NewSignup`, `GetByID`, `RegisterPresence`) | Única parte que conhece o SQLite. A unicidade da inscrição é garantida pelo banco. |
 | `Signup` | Estrutura de dados da inscrição, também usada como corpo JSON. |
@@ -102,19 +103,15 @@ ainda acoplam mais do que deveriam:
   maiúscula, padrão do Go). Trocar o `auth` mudaria a resposta do `users`.
 - Toda requisição de eventos e de inscrições chama o `auth` (acoplamento
   temporal): se o `auth` cair, esses serviços param de responder com sucesso.
-  A inscrição depende ainda do `event_registration`.
-- O `signups` confia no nome de usuário enviado no corpo, pois o `auth` só
-  responde se o token vale, não de quem ele é. Ver [ADR-003](adr/ADR-003.md). Esse custo foi aceito em troca da
-  revogação imediata de sessões ([ADR-003](adr/ADR-003.md)).
+  A inscrição depende ainda do `event_registration`. Esse custo foi aceito em
+  troca da revogação imediata de sessões ([ADR-003](adr/ADR-003.md)).
 
 **Acoplamento dentro dos serviços**:
 
 - `server.zig`, o repositório do `auth` e o do `signups` guardam a conexão com
-  o banco em variável global. No `signups` o banco é aberto num `init()` com
-  caminho fixo (`db.db`), então os testes não poderiam usar outro banco sem
-  mudar o código. No `auth`, o banco é aberto explicitamente por
-  `repository.Open(caminho)`, chamado pelo `main` (opção `-db`), o que permite
-  aos testes usar um banco temporário. Ainda assim não dá para trocar o
+  o banco em variável global. No `auth` e no `signups`, o banco é aberto
+  explicitamente pelo `main` (`repository.Open(caminho)` e `openDB(caminho)`,
+  opção `-db`), o que permite aos testes usar um banco temporário. Ainda assim não dá para trocar o
   repositório por um falso. Passar essas dependências por parâmetro, atrás de
   uma interface, seria o próximo passo.
 - Em `users`, o adaptador `Users.Auth` lê opções extras do ambiente
@@ -137,5 +134,6 @@ ainda acoplam mais do que deveriam:
 - **ISP**: cada adaptador expõe só o que seu serviço usa. `users` não sabe
   validar tokens e `event_registration` não sabe criar credenciais.
 - No `signups` os clientes do `auth` e do `event_registration` são funções
-  concretas no mesmo arquivo dos *handlers*, sem interface. Separá-los num
-  pacote atrás de uma interface permitiria testar os *handlers* com dublês.
+  concretas no mesmo arquivo dos *handlers*, sem interface. Os testes
+  substituem os dois serviços por servidores `httptest` falsos, trocando as
+  URLs. Uma interface permitiria dublês sem HTTP.

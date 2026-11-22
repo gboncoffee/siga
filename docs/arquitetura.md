@@ -36,7 +36,7 @@ Como cada estilo aparece no código:
 
 | Componente | Linguagem | Porta padrão | Responsabilidade | Persistência | Depende de |
 |---|---|---|---|---|---|
-| `auth` | Go (`net/http`) | 8080, só `localhost` | Credenciais (hash da senha) e sessões (tokens UUID). Responde se um token é válido. | SQLite `db.db` (opção `-db`): tabelas `credentials` e `sessions` | — |
+| `auth` | Go (`net/http`) | 8080, só `localhost` | Credenciais (hash da senha) e sessões (tokens UUID). Responde se um token é válido e de quem ele é. | SQLite `db.db` (opção `-db`): tabelas `credentials` e `sessions` | — |
 | `users` | Elixir/Phoenix | 4000 | Cadastro de contas (nomes) e porta de entrada do login. | SQLite via Ecto: tabela `users` | `auth` |
 | `event_registration` | Zig (`httpz`) | 16000 | Cadastro e consulta de eventos, exigindo sessão válida. | SQLite `events.db`: tabela `events` | `auth` |
 | `signups` | Go (`net/http`) | 8081 | Inscrições e presença (RF06 e RF09, parciais). | SQLite `db.db`: tabela `signups` | `auth`, `event_registration` |
@@ -50,7 +50,7 @@ Todas as chamadas são HTTP/1.1 síncronas com corpo JSON ([ADR-004](adr/ADR-004
 | `users` | `auth` | `POST /credentials` | Criação de conta, dentro da transação do `users` |
 | `users` | `auth` | `POST /login` | Login. A resposta é repassada ao cliente. |
 | `event_registration` | `auth` | `GET /{token}` | Em **toda** requisição de eventos, antes de qualquer operação |
-| `signups` | `auth` | `GET /{token}` | Em **toda** requisição de inscrições, antes de qualquer operação |
+| `signups` | `auth` | `GET /{token}` | Em **toda** requisição de inscrições, antes de qualquer operação. Usa o nome do usuário da resposta. |
 | `signups` | `event_registration` | `GET /event/{id}` com o token do cliente | Na inscrição, para confirmar que o evento existe |
 
 O token vai do cliente para os serviços no cabeçalho
@@ -107,11 +107,12 @@ e o envio de e-mail de confirmação de inscrição.
 - Sessões não expiram. Só o logout as remove.
 - Não há autenticação entre serviços: a proteção do `POST /credentials` é o
   `auth` só aceitar conexões de `localhost` ([ADR-005](adr/ADR-005.md)).
-- Não há papéis: qualquer usuário autenticado pode cadastrar eventos e
-  registrar presença. O ator Organizador ainda não é diferenciado.
-- O `signups` não sabe de quem é o token ([ADR-003](adr/ADR-003.md)). Um usuário
-  autenticado pode inscrever outro nome, inclusive de alguém sem conta, ou
-  mudar a presença de qualquer inscrição.
+- Não há papéis: qualquer usuário autenticado pode cadastrar eventos. O ator
+  Organizador ainda não é diferenciado.
+- No `signups`, cada usuário só inscreve a si mesmo e só muda a presença da
+  própria inscrição: o nome vem do `auth`, não do corpo. Consultar uma
+  inscrição pelo id (`GET /signup/{id}`) continua aberto a qualquer usuário
+  autenticado.
 
 ## Documentação de API
 
@@ -126,7 +127,7 @@ puro.
 | `POST /credentials` | `{"Username": "...", "Password": "..."}` | 200; 400 JSON inválido; 500 erro ao gravar (inclui nome repetido) |
 | `POST /login` | `{"Username": "...", "Password": "..."}` | 200 `{"Token": "<uuid>"}`; 400 JSON inválido; 401 nome ou senha inválidos |
 | `POST /logout/{uuid}` | — | 200; 400 token malformado |
-| `GET /{uuid}` | — | 200 sessão existe; 400 token malformado; 401 sessão não existe |
+| `GET /{uuid}` | — | 200 `{"Username": "..."}`, dono da sessão; 400 token malformado; 401 sessão não existe; 500 erro no banco |
 
 ### `users` (`:4000`)
 
@@ -150,12 +151,14 @@ ar, a resposta é 503.
 ### `signups` (`:8081`)
 
 Todas as rotas exigem `Authorization: Bearer <uuid>`. Sem token, ou com token
-inválido, a resposta é 401. Com o `auth` fora do ar, 503.
+inválido, a resposta é 401. Com o `auth` fora do ar, 503. O usuário é sempre o
+dono do token. O campo `username` no corpo é opcional, mas se vier com outro
+nome a resposta é 403.
 
 | Rota | Corpo | Respostas |
 |---|---|---|
-| `POST /signup` | `{"username": "ana", "event_id": 1}` | 201 `{"id": 1, "username": "ana", "event_id": 1, "presence_confirmed": 0}`; 400 JSON inválido ou nome vazio; 404 evento não existe; 409 já inscrito; 503 `event_registration` fora do ar |
-| `PUT /presence` | `{"username": "ana", "event_id": 1, "presence_confirmed": 1}` | 200; 400 JSON inválido ou `presence_confirmed` diferente de 0 e 1; 404 inscrição não existe |
+| `POST /signup` | `{"event_id": 1}` | 201 `{"id": 1, "username": "ana", "event_id": 1, "presence_confirmed": 0}`; 400 JSON inválido; 403 outro usuário; 404 evento não existe; 409 já inscrito; 503 `event_registration` fora do ar |
+| `PUT /presence` | `{"event_id": 1, "presence_confirmed": 1}` | 200; 400 JSON inválido ou `presence_confirmed` diferente de 0 e 1; 403 outro usuário; 404 o usuário não está inscrito no evento |
 | `GET /signup/{id}` | — | 200 `{"id": 1, "username": "ana", "event_id": 1, "presence_confirmed": 1}`; 400 id inválido; 404 não existe |
 
 ## Testes
@@ -164,5 +167,5 @@ inválido, a resposta é 401. Com o `auth` fora do ar, 503.
 |---|---|---|
 | `users` | `mix test` | Controladores e o contexto `Accounts`, incluindo rollback quando o `auth` recusa ou está fora, com o `auth` substituído por *stub* |
 | `event_registration` | `zig build test` | Testes de unidade de `options` e de `auth` (leitura do cabeçalho e validação de UUID) |
-| `auth` | `go test ./...` | Repositório (credenciais, nome repetido, ciclo de vida da sessão) e as rotas HTTP reais via `httptest`: login, logout, senha errada, usuário desconhecido, token malformado, JSON inválido e método não permitido. Cada execução usa um banco temporário. |
-| `signups` | `go vet ./...` | Sem testes automatizados. As rotas foram testadas à mão, com `curl`, subindo `auth`, `event_registration` e `signups`. |
+| `auth` | `go test ./...` | Repositório (credenciais, nome repetido, ciclo de vida e dono da sessão, migração da tabela antiga de sessões) e as rotas HTTP reais via `httptest`: login, logout, senha errada, usuário desconhecido, token malformado, JSON inválido e método não permitido. Cada execução usa um banco temporário. |
+| `signups` | `go test ./...` | Rotas HTTP reais via `httptest`, com `auth` e `event_registration` falsos: inscrição com o dono do token, 403 ao agir por outro usuário (inscrição e presença), inscrição repetida, evento inexistente, token ausente ou inválido, `auth` fora do ar. Cada execução usa um banco temporário. |

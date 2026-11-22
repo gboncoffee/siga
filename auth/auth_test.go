@@ -85,7 +85,16 @@ func TestLoginLogoutFlow(t *testing.T) {
 	createCredentials(t, "ana", "segredo")
 	token := loginAs(t, "ana", "segredo")
 
-	expectStatus(t, request(t, "GET", "/"+token, ""), http.StatusOK)
+	res := request(t, "GET", "/"+token, "")
+	expectStatus(t, res, http.StatusOK)
+	var out AuthenticatedResponse
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decoding GET /{uuid} response: %v", err)
+	}
+	if out.Username != "ana" {
+		t.Errorf("GET /{uuid}: Username = %q, want %q", out.Username, "ana")
+	}
+
 	expectStatus(t, request(t, "POST", "/logout/"+token, ""), http.StatusOK)
 	expectStatus(t, request(t, "GET", "/"+token, ""), http.StatusUnauthorized)
 }

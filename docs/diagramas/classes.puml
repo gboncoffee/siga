@@ -18,8 +18,8 @@ package "auth (Go)" as AuthSvc {
   class "repository" as AuthRepo <<repositório>> {
     + NewCredential(c: Credential): error
     + GetByUsername(username: string): (Credential, error)
-    + NewSession(token: UUID): error
-    + SessionExists(token: UUID): error
+    + NewSession(token: UUID, username: string): error
+    + SessionUsername(token: UUID): (string, error)
     + DeleteSession(token: UUID): error
   }
   class Credential <<entidade>> {
@@ -28,6 +28,7 @@ package "auth (Go)" as AuthSvc {
   }
   class Session <<tabela>> {
     + token: UUID
+    + username: string
   }
   router --> AuthHandlers
   AuthHandlers --> AuthRepo
@@ -123,11 +124,13 @@ package "signups (Go)" as RegSvc {
     + check_signup(w, r)
   }
   class RegClients <<gateway>> {
-    + authenticate(w, r): token
+    + authenticate(w, r): (session, bool)
+    + ownUsername(w, s: session, fromBody): (string, bool)
     + eventExists(w, token, id: int32): bool
     - bearer(r): string
   }
   class "repository" as RegRepo <<repositório>> {
+    + openDB(path): error
     + NewSignup(username, event_id): (int64, error)
     + GetByID(id: int32): (Signup, error)
     + RegisterPresence(s: Signup): error

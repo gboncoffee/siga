@@ -77,9 +77,9 @@ curl -X POST localhost:16000/event -H "Authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' -d '{"name": "Semana Acadêmica"}'
 curl localhost:16000/event -H "Authorization: Bearer $TOKEN"
 curl -X POST localhost:8081/signup -H "Authorization: Bearer $TOKEN" \
-  -d '{"username": "ana", "event_id": 1}'
+  -d '{"event_id": 1}'
 curl -X PUT localhost:8081/presence -H "Authorization: Bearer $TOKEN" \
-  -d '{"username": "ana", "event_id": 1, "presence_confirmed": 1}'
+  -d '{"event_id": 1, "presence_confirmed": 1}'
 curl localhost:8081/signup/1 -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -98,5 +98,5 @@ cd event_registration && zig build test
 ```
 
 ```sh
-cd signups && go vet ./...   # ainda sem testes automatizados
+cd signups && go test ./...
 ```

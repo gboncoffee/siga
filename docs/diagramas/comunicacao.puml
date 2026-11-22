@@ -18,7 +18,7 @@ P -- Ctrl : 1: POST /login {name, password} →\n← 1.2: resposta do auth (200 
 Ctrl -- Acc : 1.1: login(name, password) →
 Acc -- Gw : 1.1.1: login(name, password) →
 Gw -- Login : 1.1.1.1: POST /login {Username, Password} →
-Login -- Repo : 1.1.1.1.1: GetByUsername(username) →\n1.1.1.1.2: [senha confere] NewSession(token) →
+Login -- Repo : 1.1.1.1.1: GetByUsername(username) →\n1.1.1.1.2: [senha confere] NewSession(token, username) →
 Ctrl -- Fb : 1.3: [auth inacessível] call(conn, {:error, :auth_unavailable}) →\n[sem nome ou senha] call(conn, {:error, :bad_request}) →
 
 note bottom of Fb

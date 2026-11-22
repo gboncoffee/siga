@@ -3,7 +3,6 @@ package main
 import (
 	"database/sql"
 	"errors"
-	"log"
 
 	_ "modernc.org/sqlite"
 )
@@ -20,18 +19,19 @@ var errDuplicate = errors.New("already signed up")
 
 var db *sql.DB
 
-func init() {
-	var err error
-	db, err = sql.Open("sqlite", "db.db")
+// openDB opens (creating if needed) the SQLite database at path. It must be
+// called before any other function of this file.
+func openDB(path string) error {
+	conn, err := sql.Open("sqlite", path)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	// One connection: requests wait for each other instead of failing with
 	// "database is locked".
-	db.SetMaxOpenConns(1)
+	conn.SetMaxOpenConns(1)
 
-	_, err = db.Exec(`
+	_, err = conn.Exec(`
 		CREATE TABLE IF NOT EXISTS signups (
 			id INTEGER PRIMARY KEY,
 			username TEXT NOT NULL,
@@ -40,8 +40,11 @@ func init() {
 			UNIQUE (event_id, username)
 		)`)
 	if err != nil {
-		log.Fatal(err)
+		conn.Close()
+		return err
 	}
+	db = conn
+	return nil
 }
 
 // NewSignup returns the id of the new signup, or errDuplicate if the user is

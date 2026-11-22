@@ -34,7 +34,7 @@ A coluna "Situação" diz o que o protótipo já implementa.
 | RF06 | O participante deve poder se inscrever em um evento enquanto houver vagas. | Parcial: a inscrição existe (`signups`, `POST /signup`), confere se o evento existe e impede inscrição repetida, mas eventos ainda não têm vagas |
 | RF07 | Com o evento lotado, a inscrição deve entrar numa lista de espera, por ordem de chegada. | Pendente |
 | RF08 | O participante deve poder cancelar a inscrição. A vaga liberada vai para o primeiro da lista de espera. | Pendente |
-| RF09 | O organizador deve poder registrar a presença dos inscritos. | Parcial: `PUT /presence` e `GET /signup/{id}` existem, mas qualquer usuário autenticado pode registrar presença, pois ainda não há papel de organizador |
+| RF09 | O organizador deve poder registrar a presença dos inscritos. | Parcial: `PUT /presence` existe, mas cada participante confirma a própria presença, pois ainda não há papel de organizador |
 
 ## Restrições
 

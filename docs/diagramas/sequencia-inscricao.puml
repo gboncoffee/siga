@@ -9,7 +9,7 @@ participant "event_registration\n(Zig)" as Ev
 participant "repository\n(signups)" as Repo
 database "signups\n(db.db)" as SDb
 
-P -> H : POST /signup\nAuthorization: Bearer <token>\n{"username": "ana", "event_id": 1}
+P -> H : POST /signup\nAuthorization: Bearer <token>\n{"event_id": 1}
 activate H
 
 H -> H : authenticate(w, r)\nbearer(r)
@@ -23,11 +23,13 @@ else token presente
     AuthSvc --> H : token malformado / sessão não existe
     H --> P : 401 invalid token
   else 200
-    AuthSvc --> H : sessão válida
+    AuthSvc --> H : {"Username": "ana"}
     H -> H : decodifica JSON
-    alt JSON inválido ou username vazio
+    alt JSON inválido
       H --> P : 400
-    else corpo válido
+    else username no corpo diferente de "ana"
+      H --> P : 403 cannot act on behalf of another user
+    else corpo válido (username = dono do token)
       H -> Ev : GET /event/{event_id}\nAuthorization: Bearer <token>
       alt evento não existe
         Ev --> H : 404

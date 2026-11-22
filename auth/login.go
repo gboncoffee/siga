@@ -37,7 +37,7 @@ func login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	token := uuid.New()
-	if err := repository.NewSession(token); err != nil {
+	if err := repository.NewSession(token, c.Username); err != nil {
 		http.Error(w,
 			"internal server error",
 			http.StatusInternalServerError,

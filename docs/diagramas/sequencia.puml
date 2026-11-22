@@ -22,9 +22,9 @@ alt token ausente ou malformado
 else token bem formado
   Gw -> AuthSvc : GET /{uuid}
   alt auth acessível
-    AuthSvc -> SessDb : SessionExists(token)
+    AuthSvc -> SessDb : SessionUsername(token)
     SessDb --> AuthSvc : linha / sem linha
-    AuthSvc --> Gw : 200 ou 401
+    AuthSvc --> Gw : 200 {"Username": ...} ou 401
   else auth fora do ar
     Gw -> Gw : falha de conexão
   end

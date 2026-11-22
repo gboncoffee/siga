@@ -19,10 +19,17 @@ func main() {
 	flag.StringVar(&authURL, "auth-url", "http://localhost:8080", "base URL of the auth service")
 	flag.StringVar(&eventURL, "event-url", "http://localhost:16000", "base URL of the event service")
 
+	var dbPath string
+	flag.StringVar(&dbPath, "db", "db.db", "path of the SQLite database")
+
 	flag.Parse()
 
 	authURL = strings.TrimRight(authURL, "/")
 	eventURL = strings.TrimRight(eventURL, "/")
+
+	if err := openDB(dbPath); err != nil {
+		log.Fatal(err)
+	}
 
 	router()
 

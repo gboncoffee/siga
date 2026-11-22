@@ -31,32 +31,57 @@ func bearer(r *http.Request) string {
 	return ""
 }
 
-// authenticate asks the auth service if the token of the request is a valid
-// session. It returns the token, or "" after writing the error response.
-func authenticate(w http.ResponseWriter, r *http.Request) string {
+// session is an authenticated request: its token and the user that owns it.
+type session struct {
+	token    string
+	username string
+}
+
+// authenticate asks the auth service whose session the token of the request
+// is. It returns ok == false after writing the error response.
+func authenticate(w http.ResponseWriter, r *http.Request) (s session, ok bool) {
 	token := bearer(r)
 	if token == "" {
 		http.Error(w, "missing bearer token", http.StatusUnauthorized)
-		return ""
+		return s, false
 	}
 
 	resp, err := client.Get(authURL + "/" + url.PathEscape(token))
 	if err != nil {
 		log.Println("auth request:", err)
 		http.Error(w, "auth service unavailable", http.StatusServiceUnavailable)
-		return ""
+		return s, false
 	}
 	defer resp.Body.Close()
 
 	switch resp.StatusCode {
 	case http.StatusOK:
-		return token
 	case http.StatusBadRequest, http.StatusUnauthorized:
 		http.Error(w, "invalid token", http.StatusUnauthorized)
+		return s, false
 	default:
 		http.Error(w, "auth service error: "+resp.Status, http.StatusServiceUnavailable)
+		return s, false
 	}
-	return ""
+
+	var body struct{ Username string }
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil || body.Username == "" {
+		log.Println("auth response without username:", err)
+		http.Error(w, "auth service error: bad response", http.StatusServiceUnavailable)
+		return s, false
+	}
+	return session{token: token, username: body.Username}, true
+}
+
+// ownUsername checks that the username of the body, if any, is the one of the
+// session: a user can only act on their own signups. It returns the username
+// to use, or ok == false after writing the error response.
+func ownUsername(w http.ResponseWriter, s session, fromBody string) (string, bool) {
+	if fromBody != "" && fromBody != s.username {
+		http.Error(w, "cannot act on behalf of another user", http.StatusForbidden)
+		return "", false
+	}
+	return s.username, true
 }
 
 // eventExists asks the event service (with the caller's token) if the event
@@ -90,10 +115,12 @@ func eventExists(w http.ResponseWriter, token string, id int32) bool {
 	return false
 }
 
-// POST /signup  {"username": "ana", "event_id": 1}
+// POST /signup  {"event_id": 1}
+// Signs up the owner of the token. "username" may be in the body, but it must
+// be the owner's.
 func signup(w http.ResponseWriter, r *http.Request) {
-	token := authenticate(w, r)
-	if token == "" {
+	sess, ok := authenticate(w, r)
+	if !ok {
 		return
 	}
 
@@ -102,11 +129,10 @@ func signup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
-	if strings.TrimSpace(s.Username) == "" {
-		http.Error(w, "username is required", http.StatusBadRequest)
+	if s.Username, ok = ownUsername(w, sess, s.Username); !ok {
 		return
 	}
-	if !eventExists(w, token, s.EventID) {
+	if !eventExists(w, sess.token, s.EventID) {
 		return
 	}
 
@@ -125,16 +151,22 @@ func signup(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, s)
 }
 
-// PUT /presence  {"username": "ana", "event_id": 1, "presence_confirmed": 1}
-// presence_confirmed is 1 to confirm and 0 to unconfirm.
+// PUT /presence  {"event_id": 1, "presence_confirmed": 1}
+// presence_confirmed is 1 to confirm and 0 to unconfirm. Changes the signup of
+// the owner of the token; "username" may be in the body, but it must be the
+// owner's.
 func presence(w http.ResponseWriter, r *http.Request) {
-	if authenticate(w, r) == "" {
+	sess, ok := authenticate(w, r)
+	if !ok {
 		return
 	}
 
 	var s Signup
 	if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if s.Username, ok = ownUsername(w, sess, s.Username); !ok {
 		return
 	}
 	if s.PresenceConfirmed != 0 && s.PresenceConfirmed != 1 {
@@ -158,7 +190,7 @@ func presence(w http.ResponseWriter, r *http.Request) {
 
 // GET /signup/{id}
 func check_signup(w http.ResponseWriter, r *http.Request) {
-	if authenticate(w, r) == "" {
+	if _, ok := authenticate(w, r); !ok {
 		return
 	}
 
