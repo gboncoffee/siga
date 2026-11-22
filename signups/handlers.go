@@ -43,7 +43,7 @@ func authenticate(w http.ResponseWriter, r *http.Request) string {
 	resp, err := client.Get(authURL + "/" + url.PathEscape(token))
 	if err != nil {
 		log.Println("auth request:", err)
-		http.Error(w, "auth service unavailable", http.StatusBadGateway)
+		http.Error(w, "auth service unavailable", http.StatusServiceUnavailable)
 		return ""
 	}
 	defer resp.Body.Close()
@@ -54,7 +54,7 @@ func authenticate(w http.ResponseWriter, r *http.Request) string {
 	case http.StatusBadRequest, http.StatusUnauthorized:
 		http.Error(w, "invalid token", http.StatusUnauthorized)
 	default:
-		http.Error(w, "auth service error: "+resp.Status, http.StatusBadGateway)
+		http.Error(w, "auth service error: "+resp.Status, http.StatusServiceUnavailable)
 	}
 	return ""
 }
@@ -73,7 +73,7 @@ func eventExists(w http.ResponseWriter, token string, id int32) bool {
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Println("event request:", err)
-		http.Error(w, "event service unavailable", http.StatusBadGateway)
+		http.Error(w, "event service unavailable", http.StatusServiceUnavailable)
 		return false
 	}
 	defer resp.Body.Close()
@@ -85,7 +85,7 @@ func eventExists(w http.ResponseWriter, token string, id int32) bool {
 	if resp.StatusCode >= 400 && resp.StatusCode < 500 {
 		http.Error(w, "event service: "+resp.Status, resp.StatusCode)
 	} else {
-		http.Error(w, "event service: "+resp.Status, http.StatusBadGateway)
+		http.Error(w, "event service: "+resp.Status, http.StatusServiceUnavailable)
 	}
 	return false
 }
@@ -125,7 +125,7 @@ func signup(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, s)
 }
 
-// POST /presence  {"username": "ana", "event_id": 1, "presence_confirmed": 1}
+// PUT /presence  {"username": "ana", "event_id": 1, "presence_confirmed": 1}
 // presence_confirmed is 1 to confirm and 0 to unconfirm.
 func presence(w http.ResponseWriter, r *http.Request) {
 	if authenticate(w, r) == "" {

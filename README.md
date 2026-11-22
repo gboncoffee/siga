@@ -20,6 +20,7 @@ acadêmicos e inscrições.
   - [Classes](docs/diagramas/classes.png)
   - [Sequência: cadastrar evento](docs/diagramas/sequencia.png)
   - [Sequência: criar conta](docs/diagramas/sequencia-cadastro.png)
+  - [Sequência: inscrever em evento](docs/diagramas/sequencia-inscricao.png)
   - [Comunicação: login](docs/diagramas/comunicacao.png)
   - [Componentes](docs/diagramas/componentes.png)
 
@@ -43,6 +44,7 @@ docs/site/build.sh /outro/dir   # gera em outro diretório
 | [auth](auth) | Go | `localhost:8080` | Credenciais e sessões |
 | [users](users) | Elixir/Phoenix | 4000 | Contas e login |
 | [event_registration](event_registration) | Zig | 16000 | Eventos |
+| [signups](signups) | Go | 8081 | Inscrições e presença |
 
 ## Rodando
 
@@ -60,6 +62,10 @@ cd users && mix setup && SIGA_AUTH_URL=http://localhost:8080 mix phx.server
 cd event_registration && SIGA_AUTH_URL=http://localhost:8080 zig build run -- -port 16000
 ```
 
+```sh
+cd signups && go run . -port 8081 -auth-url http://localhost:8080 -event-url http://localhost:16000
+```
+
 Exemplo de uso:
 
 ```sh
@@ -70,6 +76,11 @@ TOKEN=$(curl -s -X POST localhost:4000/login -H 'content-type: application/json'
 curl -X POST localhost:16000/event -H "Authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' -d '{"name": "Semana Acadêmica"}'
 curl localhost:16000/event -H "Authorization: Bearer $TOKEN"
+curl -X POST localhost:8081/signup -H "Authorization: Bearer $TOKEN" \
+  -d '{"username": "ana", "event_id": 1}'
+curl -X PUT localhost:8081/presence -H "Authorization: Bearer $TOKEN" \
+  -d '{"username": "ana", "event_id": 1, "presence_confirmed": 1}'
+curl localhost:8081/signup/1 -H "Authorization: Bearer $TOKEN"
 ```
 
 ## Testes
@@ -84,4 +95,8 @@ cd users && mix test
 
 ```sh
 cd event_registration && zig build test
+```
+
+```sh
+cd signups && go vet ./...   # ainda sem testes automatizados
 ```

@@ -1,0 +1,57 @@
+@startuml sequencia-inscricao
+title SIGA - Sequência: inscrever em evento (POST /signup)
+
+autonumber
+actor Participante as P
+participant "handlers\n(signups)" as H
+participant "auth\n(Go)" as AuthSvc
+participant "event_registration\n(Zig)" as Ev
+participant "repository\n(signups)" as Repo
+database "signups\n(db.db)" as SDb
+
+P -> H : POST /signup\nAuthorization: Bearer <token>\n{"username": "ana", "event_id": 1}
+activate H
+
+H -> H : authenticate(w, r)\nbearer(r)
+alt token ausente
+  H --> P : 401 missing bearer token
+else token presente
+  H -> AuthSvc : GET /{token}
+  alt auth fora do ar (ou sem resposta em 5 s)
+    H --> P : 503 auth service unavailable
+  else 400 ou 401
+    AuthSvc --> H : token malformado / sessão não existe
+    H --> P : 401 invalid token
+  else 200
+    AuthSvc --> H : sessão válida
+    H -> H : decodifica JSON
+    alt JSON inválido ou username vazio
+      H --> P : 400
+    else corpo válido
+      H -> Ev : GET /event/{event_id}\nAuthorization: Bearer <token>
+      alt evento não existe
+        Ev --> H : 404
+        H --> P : 404 event service: 404
+      else serviço de eventos fora do ar ou 5xx
+        H --> P : 503
+      else 200
+        Ev --> H : {"id": 1, "name": "..."}
+        H -> Repo : NewSignup(username, event_id)
+        activate Repo
+        Repo -> SDb : INSERT ... ON CONFLICT (event_id, username) DO NOTHING
+        SDb --> Repo : linhas afetadas
+        alt 0 linhas
+          Repo --> H : errDuplicate
+          H --> P : 409 already signed up for this event
+        else 1 linha
+          Repo --> H : id
+          H --> P : 201 {"id": id, "username": "ana",\n"event_id": 1, "presence_confirmed": 0}
+        end
+        deactivate Repo
+      end
+    end
+  end
+end
+deactivate H
+
+@enduml

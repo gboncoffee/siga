@@ -37,31 +37,43 @@ node "Máquina única" {
     AHandlers --> ARepo
   }
 
-  component "inscrições\n(pendente)" as Reg #EEEEEE
+  component "signups\n(Go, :8081)" as Reg {
+    portin "POST /signup\nPUT /presence\nGET /signup/{id}" as RegApi
+    [handlers] as RHandlers
+    [authenticate\neventExists\n(clientes HTTP)] as RGw
+    [repository] as RRepo
+    RegApi --> RHandlers
+    RHandlers --> RGw
+    RHandlers --> RRepo
+  }
 
   database "users_dev.db\n(DATABASE_PATH em prod)" as UDb
   database "events.db" as EDb
   database "db.db\n(credentials, sessions)" as ADb
-  database "inscrições.db" as RDb #EEEEEE
+  database "db.db\n(signups)" as RDb
 
   URepo --> UDb
   ERepo --> EDb
   ARepo --> ADb
-  Reg ..> RDb
+  RRepo --> RDb
 }
 
 Cliente --> UsersApi : HTTP/JSON
 Cliente --> EventsApi : HTTP/JSON\nBearer token
-Cliente ..> Reg : HTTP/JSON\nBearer token
+Cliente --> RegApi : HTTP/JSON\nBearer token
 
 UGw --> AuthApi : HTTP/JSON\n(criar credencial, login)
-EGw --> AuthApi : HTTP\n(validar token)
-Reg ..> AuthApi : validar token
-Reg ..> EventsApi : consultar evento
+EGw --> AuthApi
+RGw --> AuthApi
+RGw --> EventsApi : HTTP\n(consultar evento)
 
 note right of Auth
   Rotas: POST /credentials, POST /login,
   POST /logout/{uuid}, GET /{uuid}
+
+  event_registration e signups chamam
+  GET /{uuid} em toda requisição
+  para validar o token.
 
   Escuta só em localhost (ADR-005).
   Clientes nunca acessam diretamente.

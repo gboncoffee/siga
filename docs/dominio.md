@@ -10,13 +10,15 @@ Diagrama correspondente: [diagramas/classes.puml](diagramas/classes.puml).
 | Credencial | `auth` | Par nome de usuário e hash SHA-512 da senha. |
 | Sessão | `auth` | Token UUID gerado no login e apagado no logout. |
 | Evento | `event_registration` | Atividade acadêmica com identificador e nome. |
-| Inscrição | pendente | Vínculo entre usuário e evento, com situação (confirmada, em espera, cancelada). |
-| Presença | pendente | Registro de que um inscrito compareceu ao evento. |
+| Inscrição | `signups` | Vínculo entre um nome de usuário e um id de evento. Única por par (usuário, evento). Situações de espera e cancelamento ainda não existem. |
+| Presença | `signups` | Campo `presence_confirmed` (0 ou 1) da inscrição: se o inscrito compareceu. |
 
-Os serviços não compartilham objetos. O único dado que cruza fronteiras é o
-**nome do usuário** (entre `users` e `auth`) e o **token** (entre o cliente,
-`event_registration` e `auth`). Inscrição e presença vão se referir a usuário e
-evento apenas por identificador.
+Os serviços não compartilham objetos. Os dados que cruzam fronteiras são o
+**nome do usuário** (entre `users` e `auth`, e no corpo das requisições ao
+`signups`), o **token** (do cliente para `event_registration` e `signups`, e
+deles para o `auth`) e o **id do evento** (entre `signups` e
+`event_registration`). A inscrição se refere a usuário e evento apenas por
+nome e id, sem chave estrangeira.
 
 ## Responsabilidades por módulo
 
@@ -52,16 +54,29 @@ evento apenas por identificador.
 | `repository` | Única parte que conhece o SQLite. Insere e consulta eventos. |
 | `Event`, `EventEntry` | Estruturas de dados do evento. |
 
+### `signups` (Go)
+
+| Elemento | Responsabilidade |
+|---|---|
+| `main`, `router` | Lê as opções (`-address`, `-port`, `-auth-url`, `-event-url`) e liga cada rota ao seu *handler*. |
+| `signup`, `presence`, `check_signup` | *Handlers*: autenticam, validam o corpo, chamam o repositório e escolhem o status HTTP. |
+| `authenticate` | Cliente do `auth`: extrai o token do cabeçalho `Authorization: Bearer` e pergunta ao `auth` se a sessão existe. |
+| `eventExists` | Cliente do `event_registration`: confere se o evento existe, repassando o token do cliente. |
+| `repository` (`NewSignup`, `GetByID`, `RegisterPresence`) | Única parte que conhece o SQLite. A unicidade da inscrição é garantida pelo banco. |
+| `Signup` | Estrutura de dados da inscrição, também usada como corpo JSON. |
+
 ## GRASP
 
 - **Controller**: `UserController`, `SessionController` e os *handlers* de
   `server.zig` e do `auth` recebem os eventos de sistema (requisições) e
   delegam o trabalho. Não contêm regra de persistência.
 - **Information Expert**: `Accounts.User` valida o usuário porque conhece seus
-  campos e restrições. `repository` responde se uma sessão existe porque é quem
+  campos e restrições. O `event_registration` é quem responde se um evento
+  existe, e o `signups` pergunta a ele em vez de manter uma cópia dos eventos. `repository` responde se uma sessão existe porque é quem
   tem acesso à tabela de sessões.
-- **Pure Fabrication**: `repository` (nos três serviços), `Users.Auth` e
-  `auth.zig` não são conceitos do domínio. Existem para tirar dos objetos de
+- **Pure Fabrication**: `repository` (em `auth`, `event_registration` e
+  `signups`), `Users.Auth`, `auth.zig`, `authenticate` e `eventExists` não são
+  conceitos do domínio. Existem para tirar dos objetos de
   domínio e dos controladores o acesso a banco e a rede.
 - **Indirection** e **Protected Variations**: os outros serviços nunca falam
   com o `auth` diretamente, e sim pelos adaptadores `Users.Auth` e `auth.zig`.
@@ -75,7 +90,7 @@ evento apenas por identificador.
 ## Coesão e acoplamento
 
 **Coesão alta**: cada serviço cuida de um único assunto (identidade, contas,
-eventos). Dentro de cada um, há separação entre entrada HTTP, regra e
+eventos, inscrições). Dentro de cada um, há separação entre entrada HTTP, regra e
 persistência.
 
 **Acoplamento entre serviços**: baixo e explícito. É só HTTP/JSON síncrono,
@@ -85,14 +100,19 @@ ainda acoplam mais do que deveriam:
 - `SessionController` repassa a resposta do `auth` **sem alterações**. O cliente
   fica preso ao formato do `auth` (por exemplo, o campo `Token` com inicial
   maiúscula, padrão do Go). Trocar o `auth` mudaria a resposta do `users`.
-- Toda requisição de eventos chama o `auth` (acoplamento temporal): se o `auth`
-  cair, eventos para de responder com sucesso. Esse custo foi aceito em troca da
+- Toda requisição de eventos e de inscrições chama o `auth` (acoplamento
+  temporal): se o `auth` cair, esses serviços param de responder com sucesso.
+  A inscrição depende ainda do `event_registration`.
+- O `signups` confia no nome de usuário enviado no corpo, pois o `auth` só
+  responde se o token vale, não de quem ele é. Ver [ADR-003](adr/ADR-003.md). Esse custo foi aceito em troca da
   revogação imediata de sessões ([ADR-003](adr/ADR-003.md)).
 
 **Acoplamento dentro dos serviços**:
 
-- `server.zig` e o repositório do `auth` em Go guardam a conexão com o banco
-  em variável global. No `auth`, o banco é aberto explicitamente por
+- `server.zig`, o repositório do `auth` e o do `signups` guardam a conexão com
+  o banco em variável global. No `signups` o banco é aberto num `init()` com
+  caminho fixo (`db.db`), então os testes não poderiam usar outro banco sem
+  mudar o código. No `auth`, o banco é aberto explicitamente por
   `repository.Open(caminho)`, chamado pelo `main` (opção `-db`), o que permite
   aos testes usar um banco temporário. Ainda assim não dá para trocar o
   repositório por um falso. Passar essas dependências por parâmetro, atrás de
@@ -116,3 +136,6 @@ ainda acoplam mais do que deveriam:
   HTTP e falsa, completaria o princípio.
 - **ISP**: cada adaptador expõe só o que seu serviço usa. `users` não sabe
   validar tokens e `event_registration` não sabe criar credenciais.
+- No `signups` os clientes do `auth` e do `event_registration` são funções
+  concretas no mesmo arquivo dos *handlers*, sem interface. Separá-los num
+  pacote atrás de uma interface permitiria testar os *handlers* com dublês.

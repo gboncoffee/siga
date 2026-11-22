@@ -113,25 +113,46 @@ package "event_registration (Zig)" as EventSvc {
   EventRepo ..> Event
 }
 
-package "inscrições (pendente)" as RegSvc #EEEEEE {
-  class Inscricao <<entidade>> {
-    + id
-    + evento_id
-    + usuario
-    + situacao: confirmada | espera | cancelada
-    + criada_em
+package "signups (Go)" as RegSvc {
+  class "router" as RegRouter <<rotas>> {
+    + router()
   }
-  class Presenca <<entidade>> {
-    + inscricao_id
-    + registrada_em
+  class RegHandlers <<handlers>> {
+    + signup(w, r)
+    + presence(w, r)
+    + check_signup(w, r)
   }
-  Inscricao "1" -- "0..1" Presenca
+  class RegClients <<gateway>> {
+    + authenticate(w, r): token
+    + eventExists(w, token, id: int32): bool
+    - bearer(r): string
+  }
+  class "repository" as RegRepo <<repositório>> {
+    + NewSignup(username, event_id): (int64, error)
+    + GetByID(id: int32): (Signup, error)
+    + RegisterPresence(s: Signup): error
+  }
+  class Signup <<entidade>> {
+    + ID: int64
+    + Username: string
+    + EventID: int32
+    + PresenceConfirmed: int32 {0 ou 1}
+  }
+  note bottom of Signup
+    UNIQUE (event_id, username)
+  end note
+  RegRouter --> RegHandlers
+  RegHandlers --> RegClients
+  RegHandlers --> RegRepo
+  RegRepo ..> Signup
 }
 
 ' Dependências entre serviços: só por HTTP, via gateways.
 UsersAuth ..> AuthHandlers : HTTP\nPOST /credentials\nPOST /login
 EventAuth ..> AuthHandlers : HTTP\nGET /{uuid}
-Inscricao ..> Event : evento_id\n(sem FK)
-Inscricao ..> User : usuario\n(sem FK)
+RegClients ..> AuthHandlers : HTTP\nGET /{uuid}
+RegClients ..> Server : HTTP\nGET /event/{id}
+Signup ..> Event : event_id\n(sem FK)
+Signup ..> User : username\n(sem FK)
 
 @enduml

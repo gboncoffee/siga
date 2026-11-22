@@ -5,3 +5,5 @@ event_registration/zig-out
 event_registration/zig-pkg
 event_registration/.zig-cache
 /site/
+signups/db.db
+signups/signups

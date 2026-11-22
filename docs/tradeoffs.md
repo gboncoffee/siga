@@ -10,7 +10,7 @@ separação interna rígida entre contas, autenticação e eventos.
 interfaces públicas. Um banco com tabelas separadas por módulo.
 
 **C. Microsserviços por assunto (escolhida)**: `auth`, `users`,
-`event_registration` e inscrições como processos separados, cada um com seu
+`event_registration` e `signups` como processos separados, cada um com seu
 banco, falando HTTP/JSON.
 
 ## Comparação
@@ -18,11 +18,11 @@ banco, falando HTTP/JSON.
 | Atributo | A. Monolito simples | B. Monolito modular | C. Microsserviços |
 |---|---|---|---|
 | Modificabilidade | Baixa: sem fronteiras, mudanças se espalham | Boa, se as fronteiras forem respeitadas (nada impede atalhos) | Boa: a fronteira é imposta pelo processo e pelo contrato HTTP |
-| Desempenho | Melhor: chamadas em memória | Igual ao A | Pior: cada requisição de eventos faz uma ida extra ao `auth` (latência de rede local, cerca de 1 ms) |
+| Desempenho | Melhor: chamadas em memória | Igual ao A | Pior: cada requisição de eventos ou inscrições faz uma ida extra ao `auth`, e a inscrição mais uma ao `event_registration` (latência de rede local, cerca de 1 ms cada) |
 | Disponibilidade | Uma falha derruba tudo | Uma falha derruba tudo | Falha isolada, mas o `auth` é ponto único: sem ele nenhuma rota autenticada funciona |
-| Testabilidade | Fácil de subir, difícil isolar partes | Boa: módulos testados com dublês | Boa por serviço (ex.: *stub* do `auth` no `users`). Teste ponta a ponta exige subir 3 processos. |
-| Complexidade | Baixa | Média | Alta: três linguagens, três *builds*, consistência entre bancos tratada à mão |
-| Implantação | Um artefato | Um artefato | Três artefatos e configuração de URLs (`SIGA_AUTH_URL`) |
+| Testabilidade | Fácil de subir, difícil isolar partes | Boa: módulos testados com dublês | Boa por serviço (ex.: *stub* do `auth` no `users`). Teste ponta a ponta exige subir 4 processos. |
+| Complexidade | Baixa | Média | Alta: três linguagens, quatro *builds*, consistência entre bancos tratada à mão |
+| Implantação | Um artefato | Um artefato | Quatro artefatos e configuração de URLs (`SIGA_AUTH_URL`, `-auth-url`, `-event-url`) |
 | Escalabilidade | Só a aplicação inteira | Só a aplicação inteira | Por serviço: dá para replicar só eventos/inscrições na semana acadêmica |
 | Custo de desenvolvimento | Baixo no início, cresce com o tempo | Médio | Alto para um sistema deste tamanho |
 | Desenvolvimento em paralelo e em linguagens diferentes | Impossível | Impossível | Possível (é a motivação principal) |
@@ -63,7 +63,7 @@ operacional, latência extra e o `auth` como ponto único de falha.
 
 | | |
 |---|---|
-| **Afetado** | Em cada serviço que migrar, só a camada de persistência: `auth/repository/repository.go` (driver e SQL de criação de tabelas), `event_registration/src/repository/repository.zig` (biblioteca `zig-sqlite` trocada por um cliente PostgreSQL) e, em `users`, o adaptador do Ecto em `config/*.exs` e `mix.exs`. |
+| **Afetado** | Em cada serviço que migrar, só a camada de persistência: `auth/repository/repository.go` (driver e SQL de criação de tabelas), `event_registration/src/repository/repository.zig` (biblioteca `zig-sqlite` trocada por um cliente PostgreSQL), `signups/repository.go` (driver e `ON CONFLICT`, que o PostgreSQL também aceita) e, em `users`, o adaptador do Ecto em `config/*.exs` e `mix.exs`. |
 | **Inalterado** | *Handlers*, controladores, `Accounts`, gateways do `auth`, contratos HTTP e os outros serviços. |
 | **Ajuda** | Repositório isolado em todos os serviços; banco por serviço ([ADR-002](adr/ADR-002.md)), que permite migrar um serviço de cada vez. Ecto já abstrai o banco no `users`. |
 | **Atrapalha** | Em Go e Zig o repositório é uma estrutura concreta com a conexão em variável global, sem interface. A troca é localizada, mas não pode ser testada com um repositório falso. |
@@ -73,7 +73,7 @@ operacional, latência extra e o `auth` como ponto único de falha.
 | | |
 |---|---|
 | **Afetado** | O `auth`, que passa a validar tokens do provedor institucional (ou a trocá-los por sessões próprias). O `POST /users` deixa de enviar senha, então mudam `Accounts.create_user/1` e `Users.Auth.create_credentials/2`. O `SessionController`, que repassa a resposta do `auth` sem alterações, também muda. |
-| **Inalterado** | Se o `auth` mantiver `GET /{token}`, o `event_registration` não muda nada. Regras e persistência de eventos e inscrições também ficam como estão. |
+| **Inalterado** | Se o `auth` mantiver `GET /{token}`, o `event_registration` e o `signups` não mudam nada. Regras e persistência de eventos e inscrições também ficam como estão. |
 | **Ajuda** | ASR-2 e [ADR-003](adr/ADR-003.md): só o `auth` sabe o que é uma credencial, e os outros serviços só perguntam "este token vale?". Os gateways (`Users.Auth`, `auth.zig`) concentram as mudanças do lado dos clientes. |
 | **Atrapalha** | O repasse da resposta crua do `auth` pelo `users` vaza o formato do `auth` para o cliente. Se o formato mudar, os clientes mudam junto. |
 
@@ -90,7 +90,7 @@ operacional, latência extra e o `auth` como ponto único de falha.
 
 | | |
 |---|---|
-| **Afetado** | O `auth` vira gargalo, pois é consultado em toda requisição de eventos. SQLite limita a escrita concorrente de inscrições. |
-| **Possível resposta** | Cache curto (alguns segundos) de tokens válidos no `event_registration`, que enfraquece a revogação imediata do ASR-2; réplicas de `event_registration`; troca para PostgreSQL (mudança 1). |
+| **Afetado** | O `auth` vira gargalo, pois é consultado em toda requisição de eventos e de inscrições. Cada inscrição também consulta o `event_registration`. SQLite limita a escrita concorrente de inscrições, e o `signups` usa uma única conexão. |
+| **Possível resposta** | Cache curto (alguns segundos) de tokens válidos no `event_registration` e no `signups`, que enfraquece a revogação imediata do ASR-2; réplicas de `event_registration`; troca para PostgreSQL (mudança 1). |
 | **Ajuda** | Os serviços podem ser escalados separadamente. |
 | **Atrapalha** | A validação síncrona por requisição ([ADR-003](adr/ADR-003.md)) e a restrição de rodar tudo numa máquina ([ADR-005](adr/ADR-005.md)). |

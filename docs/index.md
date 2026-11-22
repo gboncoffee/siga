@@ -12,7 +12,7 @@ sistema é dividido em microsserviços independentes, cada um em uma linguagem:
 | `auth` | Go | Credenciais e sessões |
 | `users` | Elixir/Phoenix | Contas e login |
 | `event_registration` | Zig | Eventos |
-| inscrições | (em desenvolvimento) | Inscrições, vagas, lista de espera e presença |
+| `signups` | Go | Inscrições e presença |
 
 ## Conteúdo
 
@@ -24,8 +24,8 @@ sistema é dividido em microsserviços independentes, cada um em uma linguagem:
   persistência, segurança e documentação de API.
 - [Alternativas e trade-offs](tradeoffs.md): comparação com monolito simples e
   modular, e análise de evolução.
-- [Diagramas UML](diagramas.md): classes, sequência, comunicação e
-  componentes.
+- [Diagramas UML](diagramas.md): classes, sequência (cadastrar evento, criar
+  conta, inscrever em evento), comunicação e componentes.
 - Decisões arquiteturais:
   - [ADR-001: Microsserviços por assunto](adr/ADR-001.md)
   - [ADR-002: Um banco SQLite por serviço](adr/ADR-002.md)

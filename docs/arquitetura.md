@@ -7,7 +7,7 @@ Diagrama correspondente: [diagramas/componentes.puml](diagramas/componentes.puml
 ```
 Cliente-servidor (cliente HTTP -> serviços)
         +
-Microsserviços por assunto (auth, users, event_registration, inscrições*)
+Microsserviços por assunto (auth, users, event_registration, signups)
         +
 Um banco por serviço (SQLite em arquivo)
         +
@@ -16,18 +16,16 @@ Comunicação síncrona HTTP/JSON
 Camadas dentro de cada serviço (entrada HTTP -> regra -> persistência / gateway)
 ```
 
-\* serviço de inscrições ainda em desenvolvimento.
-
 Como cada estilo aparece no código:
 
 - **Cliente-servidor**: o cliente (hoje `curl` ou os testes) fala só HTTP com
-  `users` e `event_registration`. Nenhum cliente acessa o `auth`, que escuta
+  `users`, `event_registration` e `signups`. Nenhum cliente acessa o `auth`, que escuta
   apenas em `localhost` ([ADR-005](adr/ADR-005.md)).
-- **Microsserviços**: três processos independentes, cada um com seu
+- **Microsserviços**: quatro processos independentes, cada um com seu
   diretório no repositório, sua linguagem, sua forma de compilar e seus testes
   ([ADR-001](adr/ADR-001.md)).
-- **Banco por serviço**: `auth/db.db`, `event_registration/events.db` e o banco
-  do `users` (`DATABASE_PATH`). Nenhum serviço abre o banco de outro
+- **Banco por serviço**: `auth/db.db`, `event_registration/events.db`,
+  `signups/db.db` e o banco do `users` (`DATABASE_PATH`). Nenhum serviço abre o banco de outro
   ([ADR-002](adr/ADR-002.md)).
 - **Camadas**: em todos os serviços o *handler* ou controlador HTTP não executa
   SQL. Ele chama um repositório (`repository` em Go e Zig, `Repo` com Ecto em
@@ -41,7 +39,7 @@ Como cada estilo aparece no código:
 | `auth` | Go (`net/http`) | 8080, só `localhost` | Credenciais (hash da senha) e sessões (tokens UUID). Responde se um token é válido. | SQLite `db.db` (opção `-db`): tabelas `credentials` e `sessions` | — |
 | `users` | Elixir/Phoenix | 4000 | Cadastro de contas (nomes) e porta de entrada do login. | SQLite via Ecto: tabela `users` | `auth` |
 | `event_registration` | Zig (`httpz`) | 16000 | Cadastro e consulta de eventos, exigindo sessão válida. | SQLite `events.db`: tabela `events` | `auth` |
-| inscrições | — | — | Inscrições, vagas, lista de espera e presença (RF06 a RF09). | Banco próprio | `auth`, `event_registration` |
+| `signups` | Go (`net/http`) | 8081 | Inscrições e presença (RF06 e RF09, parciais). | SQLite `db.db`: tabela `signups` | `auth`, `event_registration` |
 
 ## Comunicação
 
@@ -52,10 +50,14 @@ Todas as chamadas são HTTP/1.1 síncronas com corpo JSON ([ADR-004](adr/ADR-004
 | `users` | `auth` | `POST /credentials` | Criação de conta, dentro da transação do `users` |
 | `users` | `auth` | `POST /login` | Login. A resposta é repassada ao cliente. |
 | `event_registration` | `auth` | `GET /{token}` | Em **toda** requisição de eventos, antes de qualquer operação |
+| `signups` | `auth` | `GET /{token}` | Em **toda** requisição de inscrições, antes de qualquer operação |
+| `signups` | `event_registration` | `GET /event/{id}` com o token do cliente | Na inscrição, para confirmar que o evento existe |
 
 O token vai do cliente para os serviços no cabeçalho
 `Authorization: Bearer <uuid>`. O `event_registration` confere se ele é um UUID
-bem formado antes de colocá-lo na URL do `auth`.
+bem formado antes de colocá-lo na URL do `auth`. O `signups` não valida o
+formato, mas escapa o token (`url.PathEscape`) e trata o 400 do `auth` como
+token inválido.
 
 **Tratamento de falha** (ASR-3):
 
@@ -66,6 +68,11 @@ bem formado antes de colocá-lo na URL do `auth`.
   consegue falar com o `auth` ou recebe um status inesperado. **Pendência**: o
   cliente HTTP do Zig ainda não define tempo limite, então um `auth` travado
   (que aceita a conexão mas não responde) seguraria a requisição.
+- `signups` usa um cliente HTTP com tempo limite de 5 s para o `auth` e o
+  `event_registration`. Se algum deles estiver inacessível, ou responder 5xx,
+  responde 503. Um 4xx do `event_registration` (como 404, evento inexistente)
+  é repassado ao cliente com o mesmo status. Nada é gravado antes dessas
+  verificações, então uma falha não deixa inscrição pela metade.
 
 ## Interfaces relevantes
 
@@ -74,7 +81,8 @@ bem formado antes de colocá-lo na URL do `auth`.
 | Contrato HTTP do `auth` | `auth/router.go` | Única forma de os outros serviços usarem autenticação. |
 | `Users.Auth.create_credentials/2`, `login/2` | `users/lib/users/auth.ex` | Gateway que esconde o HTTP do `auth` do resto do `users`. Nos testes é substituído por um *stub* `Req.Test`. |
 | `Auth.authenticate(header) -> Result` | `event_registration/src/auth/auth.zig` | Gateway que transforma a resposta do `auth` em quatro resultados de domínio. |
-| `repository` | os três serviços | Separa SQL do restante do código. |
+| `authenticate`, `eventExists` | `signups/handlers.go` | Clientes do `auth` e do `event_registration`. Funções concretas, sem interface. |
+| `repository` | `auth`, `event_registration`, `signups` | Separa SQL do restante do código. |
 
 ## Integrações externas
 
@@ -83,6 +91,9 @@ do enunciado, exemplo "ServicoAutenticacao"). Ele é um processo separado e só 
 acessado pelos gateways acima. Os testes do `users` rodam sem o `auth` real,
 usando o *stub* configurado em `config/test.exs`
 (`config :users, :auth_req_options, plug: {Req.Test, Users.Auth}`).
+
+O `signups` é o primeiro serviço que consome outro serviço de negócio (o
+`event_registration`), não só o `auth`.
 
 Hoje não há integração com sistemas fora do SIGA. Candidatos naturais são o
 login institucional da universidade (ver [evolução](tradeoffs.md#análise-de-evolução))
@@ -96,13 +107,17 @@ e o envio de e-mail de confirmação de inscrição.
 - Sessões não expiram. Só o logout as remove.
 - Não há autenticação entre serviços: a proteção do `POST /credentials` é o
   `auth` só aceitar conexões de `localhost` ([ADR-005](adr/ADR-005.md)).
-- Não há papéis: qualquer usuário autenticado pode cadastrar eventos. O ator
-  Organizador ainda não é diferenciado.
+- Não há papéis: qualquer usuário autenticado pode cadastrar eventos e
+  registrar presença. O ator Organizador ainda não é diferenciado.
+- O `signups` não sabe de quem é o token ([ADR-003](adr/ADR-003.md)). Um usuário
+  autenticado pode inscrever outro nome, inclusive de alguém sem conta, ou
+  mudar a presença de qualquer inscrição.
 
 ## Documentação de API
 
 Respostas de erro de `event_registration` têm a forma `{"error": "..."}`. As de
-`users` têm a forma `{"errors": {...}}`.
+`users` têm a forma `{"errors": {...}}`. As de `auth` e `signups` são texto
+puro.
 
 ### `auth` (interno, só `localhost:8080`)
 
@@ -132,6 +147,17 @@ ar, a resposta é 503.
 | `GET /event/{id}` | — | 200 `{"id": 1, "name": "..."}`; 400 id inválido; 404 não existe |
 | `POST /event` | `{"name": "..."}` | 201 `{"id": 2, "name": "..."}` com cabeçalho `Location: /event/2`; 400 corpo inválido, nome vazio ou com mais de 128 bytes |
 
+### `signups` (`:8081`)
+
+Todas as rotas exigem `Authorization: Bearer <uuid>`. Sem token, ou com token
+inválido, a resposta é 401. Com o `auth` fora do ar, 503.
+
+| Rota | Corpo | Respostas |
+|---|---|---|
+| `POST /signup` | `{"username": "ana", "event_id": 1}` | 201 `{"id": 1, "username": "ana", "event_id": 1, "presence_confirmed": 0}`; 400 JSON inválido ou nome vazio; 404 evento não existe; 409 já inscrito; 503 `event_registration` fora do ar |
+| `PUT /presence` | `{"username": "ana", "event_id": 1, "presence_confirmed": 1}` | 200; 400 JSON inválido ou `presence_confirmed` diferente de 0 e 1; 404 inscrição não existe |
+| `GET /signup/{id}` | — | 200 `{"id": 1, "username": "ana", "event_id": 1, "presence_confirmed": 1}`; 400 id inválido; 404 não existe |
+
 ## Testes
 
 | Serviço | Comando | Cobertura atual |
@@ -139,3 +165,4 @@ ar, a resposta é 503.
 | `users` | `mix test` | Controladores e o contexto `Accounts`, incluindo rollback quando o `auth` recusa ou está fora, com o `auth` substituído por *stub* |
 | `event_registration` | `zig build test` | Testes de unidade de `options` e de `auth` (leitura do cabeçalho e validação de UUID) |
 | `auth` | `go test ./...` | Repositório (credenciais, nome repetido, ciclo de vida da sessão) e as rotas HTTP reais via `httptest`: login, logout, senha errada, usuário desconhecido, token malformado, JSON inválido e método não permitido. Cada execução usa um banco temporário. |
+| `signups` | `go vet ./...` | Sem testes automatizados. As rotas foram testadas à mão, com `curl`, subindo `auth`, `event_registration` e `signups`. |

@@ -31,10 +31,10 @@ A coluna "Situação" diz o que o protótipo já implementa.
 | RF03 | O usuário deve poder encerrar a sessão, invalidando o token. | Parcial: existe no `auth` (`POST /logout/{uuid}`), mas ainda não está exposto ao cliente |
 | RF04 | O organizador deve poder cadastrar um evento. | Implementado (`event_registration`, `POST /event`) |
 | RF05 | Usuários autenticados devem poder listar os eventos e consultar um evento pelo identificador. | Implementado (`GET /event`, `GET /event/{id}`) |
-| RF06 | O participante deve poder se inscrever em um evento enquanto houver vagas. | Pendente (serviço em desenvolvimento) |
+| RF06 | O participante deve poder se inscrever em um evento enquanto houver vagas. | Parcial: a inscrição existe (`signups`, `POST /signup`), confere se o evento existe e impede inscrição repetida, mas eventos ainda não têm vagas |
 | RF07 | Com o evento lotado, a inscrição deve entrar numa lista de espera, por ordem de chegada. | Pendente |
 | RF08 | O participante deve poder cancelar a inscrição. A vaga liberada vai para o primeiro da lista de espera. | Pendente |
-| RF09 | O organizador deve poder registrar a presença dos inscritos. | Pendente |
+| RF09 | O organizador deve poder registrar a presença dos inscritos. | Parcial: `PUT /presence` e `GET /signup/{id}` existem, mas qualquer usuário autenticado pode registrar presença, pois ainda não há papel de organizador |
 
 ## Restrições
 
@@ -44,8 +44,8 @@ A coluna "Situação" diz o que o protótipo já implementa.
   têm regras, dados e ritmos de mudança próprios e quase não compartilham
   lógica. Novas funcionalidades (certificados, notificações) tendem a ser
   igualmente independentes.
-- **Linguagens diferentes**: os serviços são escritos em Go (`auth`), Zig
-  (`event_registration`) e Elixir/Phoenix (`users`). Não há biblioteca
+- **Linguagens diferentes**: os serviços são escritos em Go (`auth` e
+  `signups`), Zig (`event_registration`) e Elixir/Phoenix (`users`). Não há biblioteca
   compartilhada entre eles, então o contrato entre as partes tem de ser
   independente de linguagem.
 - **Uma única máquina**: o protótipo roda todo em uma máquina, sem
@@ -85,7 +85,7 @@ sessão é válida; (b) depois de um logout, o token deixa de ser aceito
 **na requisição seguinte** em qualquer serviço; (c) trocar o mecanismo de
 autenticação (por exemplo, pelo login institucional da universidade) deve
 exigir mudanças apenas no `auth` e nos adaptadores que o chamam
-(`Users.Auth` em Elixir e `auth.zig` em Zig), sem tocar em regras de eventos ou
+(`Users.Auth` em Elixir, `auth.zig` em Zig e `authenticate` no `signups`), sem tocar em regras de eventos ou
 de contas.
 
 **Por que influencia a arquitetura**: obriga a isolar a autenticação num
@@ -95,8 +95,8 @@ um adaptador dentro de cada serviço (padrão *Gateway*).
 
 ### ASR-3: falha do `auth` não derruba os outros serviços
 
-**Cenário**: com o `auth` fora do ar, uma requisição a `users` ou a
-`event_registration` deve ser respondida com **503** e mensagem de erro em
+**Cenário**: com o `auth` fora do ar, uma requisição a `users`,
+`event_registration` ou `signups` deve ser respondida com **503** e mensagem de erro em
 **no máximo 5 segundos**, sem derrubar o processo nem deixar dados pela metade.
 Em particular, uma conta não pode ficar criada em `users` sem a credencial
 correspondente em `auth`.
@@ -104,11 +104,13 @@ correspondente em `auth`.
 **Por que influencia a arquitetura**: como a comunicação é síncrona
 ([ADR-004](adr/ADR-004.md)), cada chamada ao `auth` precisa de tempo limite e de
 tratamento explícito de falha (`{:error, :auth_unavailable}` em Elixir,
-`Result.unavailable` em Zig). A criação de conta grava o nome dentro de uma
+`Result.unavailable` em Zig, cliente HTTP com `Timeout` de 5 s no `signups`). A criação de conta grava o nome dentro de uma
 transação que é desfeita se o `auth` falhar, o que substitui uma transação
 distribuída.
 
-Observação: quando o serviço de inscrições existir, o requisito "nunca aceitar
+Observação: o `signups` já impede inscrição repetida mesmo com pedidos
+simultâneos, com a restrição `UNIQUE (event_id, username)` no banco e uma única
+conexão aberta. Quando os eventos tiverem vagas, o requisito "nunca aceitar
 mais inscrições do que vagas, mesmo com pedidos simultâneos" deve virar um
-quarto ASR, pois decide onde fica o controle de concorrência da contagem de
-vagas.
+quarto ASR. Ele decide onde fica o controle de concorrência: as vagas são do
+`event_registration`, mas a contagem de inscritos é do `signups`.
