@@ -9,6 +9,7 @@ acadêmicos e inscrições.
 - [Modelo de domínio e responsabilidades](docs/dominio.md)
 - [Arquitetura e documentação de API](docs/arquitetura.md)
 - [Alternativas, trade-offs e análise de evolução](docs/tradeoffs.md)
+- [Roteiro de demonstração com `curl`](docs/demonstracao.md)
 - Decisões arquiteturais:
   - [ADR-001: Microsserviços por assunto](docs/adr/ADR-001.md)
   - [ADR-002: Um banco SQLite por serviço](docs/adr/ADR-002.md)
@@ -66,7 +67,8 @@ cd event_registration && SIGA_AUTH_URL=http://localhost:8080 zig build run -- -p
 cd signups && go run . -port 8081 -auth-url http://localhost:8080 -event-url http://localhost:16000
 ```
 
-Exemplo de uso:
+Exemplo de uso (um roteiro completo está em
+[docs/demonstracao.md](docs/demonstracao.md)):
 
 ```sh
 curl -X POST localhost:4000/users -H 'content-type: application/json' \

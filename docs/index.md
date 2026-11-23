@@ -24,6 +24,8 @@ sistema é dividido em microsserviços independentes, cada um em uma linguagem:
   persistência, segurança e documentação de API.
 - [Alternativas e trade-offs](tradeoffs.md): comparação com monolito simples e
   modular, e análise de evolução.
+- [Roteiro de demonstração](demonstracao.md): sequência de chamadas `curl`
+  que passa por todos os serviços, incluindo os erros e a queda do `auth`.
 - [Diagramas UML](diagramas.md): classes, sequência (cadastrar evento, criar
   conta, inscrever em evento), comunicação e componentes.
 - Decisões arquiteturais:
